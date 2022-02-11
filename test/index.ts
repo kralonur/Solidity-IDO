@@ -4,10 +4,10 @@ import { BigNumber, BigNumberish } from "ethers";
 import { ethers } from "hardhat";
 import { ERC20Token, ERC20Token__factory, IDO, IDO__factory } from "../src/types";
 
-const _tokenBuyPrecision = 10;
+const _tokenBuyPrecision = 18;
 const _tokenSellPrecision = 10;
-const tokenBuyPrecision = BigNumber.from(10).pow(_tokenBuyPrecision);
-const tokenSellPrecision = BigNumber.from(10).pow(_tokenSellPrecision);
+let tokenBuyPrecision = BigNumber.from(10).pow(_tokenBuyPrecision);
+let tokenSellPrecision = BigNumber.from(10).pow(_tokenSellPrecision);
 
 describe("Staking", function () {
     let accounts: SignerWithAddress[];
@@ -61,20 +61,20 @@ describe("Staking", function () {
 
         await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 0
 
-        await expect(ido.join(0, BigNumber.from(400).mul(tokenBuyPrecision))) // Less than min alloc
+        await expect(ido["join(uint256,uint256)"](0, BigNumber.from(400).mul(tokenBuyPrecision))) // Less than min alloc
             .to.revertedWith("Amount is not right");
 
-        await expect(ido.join(0, BigNumber.from(1100).mul(tokenBuyPrecision))) // More than max alloc
+        await expect(ido["join(uint256,uint256)"](0, BigNumber.from(1100).mul(tokenBuyPrecision))) // More than max alloc
             .to.revertedWith("Amount is not right");
 
-        await expect(await ido.join(0, firstJoinAmount))
+        await expect(await ido["join(uint256,uint256)"](0, firstJoinAmount))
             .to.emit(tokenBuy, "Transfer")
             .withArgs(owner.address, ido.address, firstJoinAmount);
 
-        await ido.join(0, firstJoinAmount); // 2000
-        await ido.join(0, firstJoinAmount); // 3000
-        await ido.connect(accounts[1]).join(0, firstJoinAmount); // 4000 , account1 sent 1000
-        await ido.join(0, firstJoinAmount); // 5000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 2000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 3000
+        await ido.connect(accounts[1])["join(uint256,uint256)"](0, firstJoinAmount); // 4000 , account1 sent 1000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 5000
 
         expect((await ido.getUserInfo(0, owner.address))['allocation'])
             .equal(firstJoinAmount.mul(4));
@@ -84,17 +84,63 @@ describe("Staking", function () {
         expect((await ido.connect(accounts[1]).getCampaign(0))['totalAlloc'])
             .equal(firstJoinAmount.mul(5));
 
-        await expect(ido.join(0, firstJoinAmount)) // More than max goal
+        await expect(ido["join(uint256,uint256)"](0, firstJoinAmount)) // More than max goal
             .to.revertedWith("Amount exceeds the goal");
 
         await simulateTimePassed(30 * (60 * 60 * 24));
 
-        await expect(ido.join(0, firstJoinAmount)) // More than max goal
+        await expect(ido["join(uint256,uint256)"](0, firstJoinAmount)) // More than max goal
             .to.revertedWith("You cannot join now");
 
         // test for error
         await ido.approve(0, accounts[2].address);
-        await expect(ido.join(0, firstJoinAmount))
+        await expect(ido["join(uint256,uint256)"](0, firstJoinAmount))
+            .to.revertedWith("Campaign is not active");
+    });
+
+    it("Should join to campaign native", async function () {
+        tokenBuyPrecision = BigNumber.from(10).pow(18);
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
+
+        await createCampaignNative(ido, tokenSell, conversionRate, owner); // id 0
+
+        await expect(ido["join(uint256)"](0, { value: BigNumber.from(400).mul(tokenBuyPrecision) })) // Less than min alloc
+            .to.revertedWith("Amount is not right");
+
+        await expect(ido["join(uint256)"](0, { value: BigNumber.from(1100).mul(tokenBuyPrecision) })) // More than min alloc
+            .to.revertedWith("Amount is not right");
+
+        // console.log(await ethers.provider.getBalance(ido.address));
+
+        await expect(await ido["join(uint256)"](0, { value: firstJoinAmount }))
+            .to.changeEtherBalance(owner, firstJoinAmount.mul(-1));
+
+        // console.log(await ethers.provider.getBalance(ido.address));
+
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 2000
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 3000
+        await ido.connect(accounts[1])["join(uint256)"](0, { value: firstJoinAmount }); // 4000 , account1 sent 1000
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 5000
+
+        expect((await ido.getUserInfo(0, owner.address))['allocation'])
+            .equal(firstJoinAmount.mul(4));
+        expect((await ido.getUserInfo(0, accounts[1].address))['allocation'])
+            .equal(firstJoinAmount);
+
+        expect((await ido.connect(accounts[1]).getCampaign(0))['totalAlloc'])
+            .equal(firstJoinAmount.mul(5));
+
+        await expect(ido["join(uint256)"](0, { value: firstJoinAmount })) // More than max goal
+            .to.revertedWith("Amount exceeds the goal");
+
+        await simulateTimePassed(30 * (60 * 60 * 24));
+
+        await expect(ido["join(uint256)"](0, { value: firstJoinAmount })) // More than max goal
+            .to.revertedWith("You cannot join now");
+
+        // test for error
+        await ido.approve(0, accounts[2].address);
+        await expect(ido["join(uint256)"](0, { value: firstJoinAmount }))
             .to.revertedWith("Campaign is not active");
     });
 
@@ -113,13 +159,13 @@ describe("Staking", function () {
         await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 1
 
         // campaign 0
-        await ido.join(0, firstJoinAmount); // 1000
-        await ido.join(0, firstJoinAmount); // 2000
-        await ido.join(0, firstJoinAmount); // 3000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 1000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 2000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 3000
 
         // campaign 1
-        await ido.connect(accounts[1]).join(1, firstJoinAmount); // 1000
-        await ido.connect(accounts[1]).join(1, firstJoinAmount.div(2)); // 1500
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount); // 1000
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount.div(2)); // 1500
 
         await expect(ido.approve(0, accounts[2].address)) // More than max goal
             .to.revertedWith("Too early to approve");
@@ -134,6 +180,44 @@ describe("Staking", function () {
         await expect(await ido.approve(0, accounts[2].address))
             .to.emit(tokenBuy, "Transfer")
             .withArgs(ido.address, accounts[2].address, firstJoinAmount.mul(3)); // IDO successful send all the funds to the address
+
+        expect((await ido.getCampaign(0))['status'])
+            .equal(2); // CampaignStatus.SUCCESS
+
+        await ido.approve(1, accounts[2].address); // approve campaign 1 (should be FAIL)
+
+        expect((await ido.getCampaign(1))['status'])
+            .equal(3); // CampaignStatus.FAIL
+    });
+
+    it("Should approve campaign native", async function () {
+        tokenBuyPrecision = BigNumber.from(10).pow(18);
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
+
+        await createCampaignNative(ido, tokenSell, conversionRate, owner); // id 0
+        await createCampaignNative(ido, tokenSell, conversionRate, owner); // id 1
+
+        // campaign 0
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 1000
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 2000
+        await ido["join(uint256)"](0, { value: firstJoinAmount }); // 3000
+
+        // campaign 1
+        await ido.connect(accounts[1])["join(uint256)"](1, { value: firstJoinAmount }); // 1000
+        await ido.connect(accounts[1])["join(uint256)"](1, { value: firstJoinAmount.div(2) }); // 1500
+
+        await expect(ido.approve(0, accounts[2].address)) // More than max goal
+            .to.revertedWith("Too early to approve");
+
+        await simulateTimePassed(30 * (60 * 60 * 24));
+
+        expect((await ido.getCampaign(0))['status'])
+            .equal(1); // CampaignStatus.ACTIVE
+        expect((await ido.getCampaign(1))['status'])
+            .equal(1); // CampaignStatus.ACTIVE
+
+        await expect(await ido.approve(0, accounts[2].address))
+            .to.changeEtherBalance(accounts[2], firstJoinAmount.mul(3));
 
         expect((await ido.getCampaign(0))['status'])
             .equal(2); // CampaignStatus.SUCCESS
@@ -159,13 +243,13 @@ describe("Staking", function () {
         await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 1
 
         // campaign 0
-        await ido.join(0, firstJoinAmount); // 1000
-        await ido.join(0, firstJoinAmount); // 2000
-        await ido.join(0, firstJoinAmount); // 3000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 1000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 2000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 3000
 
         // campaign 1
-        await ido.connect(accounts[1]).join(1, firstJoinAmount); // 1000
-        await ido.connect(accounts[1]).join(1, firstJoinAmount.div(2)); // 1500
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount); // 1000
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount.div(2)); // 1500
 
         await simulateTimePassed(30 * (60 * 60 * 24));
 
@@ -186,8 +270,33 @@ describe("Staking", function () {
             .to.revertedWith("No allocation to refund"); // try to refund again
     });
 
+    it("Should refund native", async function () {
+        tokenBuyPrecision = BigNumber.from(10).pow(18);
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
+
+        await createCampaignNative(ido, tokenSell, conversionRate, owner); // id 0
+        await createCampaignNative(ido, tokenSell, conversionRate, owner); // id 1
+
+        // campaign 1
+        await ido.connect(accounts[1])["join(uint256)"](1, { value: firstJoinAmount }); // 1000
+        await ido.connect(accounts[1])["join(uint256)"](1, { value: firstJoinAmount.div(2) }); // 1500
+
+        await simulateTimePassed(30 * (60 * 60 * 24));
+
+        await ido.approve(0, accounts[2].address); // SUCCESS
+        await ido.approve(1, accounts[2].address); // FAIL
+
+        await expect(ido.refund(1))
+            .to.revertedWith("No allocation to refund"); // no funds send from owner acc
+
+        await expect(await ido.connect(accounts[1]).refund(1))
+            .to.changeEtherBalance(accounts[1], firstJoinAmount.add(firstJoinAmount.div(2)));
+
+        await expect(ido.connect(accounts[1]).refund(1))
+            .to.revertedWith("No allocation to refund"); // try to refund again
+    });
+
     it("Should claim", async function () {
-        // const firstJoinAmount = ethers.utils.parseEther("1000");
         const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
 
         // tokenSell mint and approve
@@ -208,13 +317,13 @@ describe("Staking", function () {
         await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 2 (to fail)
 
         // campaign 0
-        await ido.join(0, firstJoinAmount); // 1000
-        await ido.join(0, firstJoinAmount); // 2000
-        await ido.join(0, firstJoinAmount); // 3000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 1000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 2000
+        await ido["join(uint256,uint256)"](0, firstJoinAmount); // 3000
 
         // campaign 1
-        await ido.connect(accounts[1]).join(1, firstJoinAmount); // 1000
-        await ido.connect(accounts[1]).join(1, firstJoinAmount); // 2000
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount); // 1000
+        await ido.connect(accounts[1])["join(uint256,uint256)"](1, firstJoinAmount); // 2000
 
         await simulateTimePassed(30 * (60 * 60 * 24));
 
@@ -249,13 +358,18 @@ describe("Staking", function () {
             .withArgs(ido.address, accounts[1].address, BigNumber.from(6000).mul(tokenSellPrecision)); // because never claimed during 3 months and 3 times conversion rate
     });
 
-
 });
 
 async function createCampaign(idoContract: IDO, tokenBuy: ERC20Token, tokenSell: ERC20Token, conversionRate: BigNumberish, owner: SignerWithAddress) {
     const vestings = [{ percent: ethers.utils.parseEther("50"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
     const startTime = BigNumber.from((await ethers.provider.getBlock("latest"))['timestamp']);
     return idoContract.connect(owner).create(tokenBuy.address, tokenSell.address, BigNumber.from(500).mul(tokenBuyPrecision), BigNumber.from(1000).mul(tokenBuyPrecision), BigNumber.from(2000).mul(tokenBuyPrecision), BigNumber.from(5000).mul(tokenBuyPrecision), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings);
+};
+
+async function createCampaignNative(idoContract: IDO, tokenSell: ERC20Token, conversionRate: BigNumberish, owner: SignerWithAddress) {
+    const vestings = [{ percent: ethers.utils.parseEther("50"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
+    const startTime = BigNumber.from((await ethers.provider.getBlock("latest"))['timestamp']);
+    return idoContract.connect(owner).create(ethers.constants.AddressZero, tokenSell.address, BigNumber.from(500).mul(tokenBuyPrecision), BigNumber.from(1000).mul(tokenBuyPrecision), BigNumber.from(2000).mul(tokenBuyPrecision), BigNumber.from(5000).mul(tokenBuyPrecision), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings);
 };
 
 async function getTokenContract(owner: SignerWithAddress, tokenName: string, tokenSymbol: string, decimals: BigNumberish) {
