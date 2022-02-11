@@ -227,10 +227,6 @@ describe("Staking", function () {
         await expect(ido.claim(2))
             .to.revertedWith("Campaign is not successful");
 
-        console.log("Precision buy: %s", tokenBuyPrecision);
-        console.log("Precision sell: %s", tokenSellPrecision);
-        console.log("Should: %s", BigNumber.from(1500).mul(tokenSellPrecision));
-
         await expect(await ido.claim(0))
             .to.emit(tokenSell, "Transfer")
             .withArgs(ido.address, owner.address, BigNumber.from(1500).mul(tokenSellPrecision));
