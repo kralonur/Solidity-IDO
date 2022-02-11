@@ -145,32 +145,24 @@ contract IDO is Ownable {
             campaign.status = CampaignStatus.FAIL;
         } else {
             campaign.status = CampaignStatus.SUCCESS;
-            IERC20Metadata(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
+            if (campaign.tokenBuy == address(0)) {
+                (bool sent, ) = owner.call{ value: campaign.totalAlloc }("");
+                require(sent, "Failed to send Ether");
+            } else IERC20Metadata(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
         }
 
         emit ApproveCampaign(_campaignId, owner);
     }
 
-    /**
-     * @dev Joins to given campaign
-     * @param _campaignId The id of the campaign
-     * @param amount The amount of tokens user puts into the campaign
-     */
+    /// @dev See {_join}
     function join(uint256 _campaignId, uint256 amount) external {
-        Campaign storage campaign = _campaigns[_campaignId];
-        require(campaign.status == CampaignStatus.ACTIVE, "Campaign is not active");
-        require(
-            campaign.saleStartTime < block.timestamp && campaign.saleEndTime > block.timestamp,
-            "You cannot join now"
-        );
-        require(campaign.maxAlloc >= amount && campaign.minAlloc <= amount, "Amount is not right");
-        require(campaign.maxGoal >= campaign.totalAlloc + amount, "Amount exceeds the goal");
+        _join(_campaignId, amount);
+    }
 
-        _userAllocations[_campaignId][msg.sender] += amount;
-        campaign.totalAlloc += amount;
-        IERC20Metadata(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
-
-        emit JoinCampaign(_campaignId, msg.sender, amount);
+    /// @dev See {_join}
+    function join(uint256 _campaignId) external payable {
+        uint256 amount = msg.value;
+        _join(_campaignId, amount);
     }
 
     /**
@@ -183,11 +175,15 @@ contract IDO is Ownable {
 
         uint256 claimable = _getTotalClaimable(_campaignId, msg.sender);
         _userClaimed[_campaignId][msg.sender] += claimable;
-        uint256 amountToSend = ((claimable * (10**(18 - IERC20Metadata(campaign.tokenBuy).decimals()))) *
-            campaign.conversionRate) / PRECISION;
+
+        uint256 tokenBuyMultiplier = campaign.tokenBuy == address(0)
+            ? _calculateMultiplier(18)
+            : _calculateMultiplier(IERC20Metadata(campaign.tokenBuy).decimals());
+
+        uint256 amountToSend = ((claimable * tokenBuyMultiplier) * campaign.conversionRate) / PRECISION;
         IERC20Metadata(campaign.tokenSell).safeTransfer(
             msg.sender,
-            amountToSend / (10**(18 - IERC20Metadata(campaign.tokenSell).decimals()))
+            amountToSend / _calculateMultiplier(IERC20Metadata(campaign.tokenSell).decimals())
         );
     }
 
@@ -195,12 +191,18 @@ contract IDO is Ownable {
      * @dev Refunds the funded tokens back to owners, in case campaign did failed
      * @param _campaignId The id of the campaign
      */
-    function refund(uint256 _campaignId) external {
+    function refund(uint256 _campaignId) external payable {
         Campaign storage campaign = _campaigns[_campaignId];
         require(campaign.status == CampaignStatus.FAIL, "Campaign did not fail");
         require(_userAllocations[_campaignId][msg.sender] > 0, "No allocation to refund");
 
-        IERC20Metadata(campaign.tokenBuy).safeTransfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
+        if (campaign.tokenBuy != address(0))
+            IERC20Metadata(campaign.tokenBuy).safeTransfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
+        else {
+            (bool sent, ) = msg.sender.call{ value: _userAllocations[_campaignId][msg.sender] }("");
+            require(sent, "Failed to send Ether");
+        }
+
         _userAllocations[_campaignId][msg.sender] = 0;
     }
 
@@ -248,5 +250,38 @@ contract IDO is Ownable {
         }
 
         return claimableAmount - claimed;
+    }
+
+    /**
+     * @dev Calculates the multiplier for amount to send
+     * @param decimals decimals
+     * @return multiplier
+     */
+    function _calculateMultiplier(uint256 decimals) private pure returns (uint256) {
+        return 10**(18 - decimals);
+    }
+
+    /**
+     * @dev Joins to given campaign
+     * @param _campaignId The id of the campaign
+     * @param amount The amount of tokens user puts into the campaign
+     */
+    function _join(uint256 _campaignId, uint256 amount) private {
+        Campaign storage campaign = _campaigns[_campaignId];
+        require(campaign.status == CampaignStatus.ACTIVE, "Campaign is not active");
+        require(
+            campaign.saleStartTime < block.timestamp && campaign.saleEndTime > block.timestamp,
+            "You cannot join now"
+        );
+        require(campaign.maxAlloc >= amount && campaign.minAlloc <= amount, "Amount is not right");
+        require(campaign.maxGoal >= campaign.totalAlloc + amount, "Amount exceeds the goal");
+
+        _userAllocations[_campaignId][msg.sender] += amount;
+        campaign.totalAlloc += amount;
+
+        if (campaign.tokenBuy != address(0))
+            IERC20Metadata(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
+
+        emit JoinCampaign(_campaignId, msg.sender, amount);
     }
 }
