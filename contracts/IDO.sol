@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: Unlicensed
+pragma solidity >=0.8.4;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract IDO is Ownable {
+    using SafeERC20 for IERC20;
+
+    struct Vesting {
+        uint256 percent;
+        uint256 timestamp;
+    }
+
+    enum CampaignStatus {
+        INVALID,
+        ACTIVE,
+        SUCCESS,
+        FAIL
+    }
+
+    struct Campaign {
+        address tokenBuy;
+        address tokenSell;
+        uint256 totalAlloc;
+        uint256 minAlloc;
+        uint256 maxAlloc;
+        uint256 minGoal;
+        uint256 maxGoal;
+        uint256 conversionRate;
+        uint256 saleStartTime;
+        uint256 saleEndTime;
+        CampaignStatus status;
+        Vesting[] vestings;
+    }
+
+    struct ClaimInfo {
+        uint256 latestClaimTime;
+        uint256 claimedAmount;
+    }
+
+    uint256 public campaignId;
+    uint256 public constant PRECISION = 1e18;
+
+    mapping(uint256 => Campaign) private _campaigns;
+    mapping(uint256 => mapping(address => uint256)) private _userAllocations;
+    mapping(uint256 => mapping(address => ClaimInfo)) private _userClaimInfo;
+
+    function create(
+        address tokenBuy,
+        address tokenSell,
+        uint256 minAlloc,
+        uint256 maxAlloc,
+        uint256 minGoal,
+        uint256 maxGoal,
+        uint256 conversionRate,
+        uint256 saleStartTime,
+        uint256 saleEndTime,
+        Vesting[] calldata vestings
+    ) external onlyOwner {
+        Campaign storage campaign = _campaigns[campaignId];
+        campaign.tokenBuy = tokenBuy;
+        campaign.tokenSell = tokenSell;
+        campaign.totalAlloc = 0;
+        campaign.minAlloc = minAlloc;
+        campaign.maxAlloc = maxAlloc;
+        campaign.minGoal = minGoal;
+        campaign.maxGoal = maxGoal;
+        campaign.conversionRate = conversionRate;
+        campaign.saleStartTime = saleStartTime;
+        campaign.saleEndTime = saleEndTime;
+        campaign.status = CampaignStatus.ACTIVE;
+
+        for (uint256 i = 0; i < vestings.length; i++) {
+            _campaigns[campaignId].vestings.push(
+                Vesting(vestings[i].percent, campaign.saleEndTime + vestings[i].timestamp)
+            );
+        }
+
+        campaignId += 1;
+    }
+
+    function approve(uint256 _campaignId, address owner) external onlyOwner {
+        Campaign storage campaign = _campaigns[_campaignId];
+        require(campaign.saleEndTime < block.timestamp, "Too early to approve");
+
+        //FAIL
+        if (campaign.totalAlloc < campaign.minGoal) {
+            campaign.status = CampaignStatus.FAIL;
+        } else {
+            campaign.status = CampaignStatus.SUCCESS;
+            IERC20(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
+        }
+    }
+
+    function join(uint256 _campaignId, uint256 amount) external {
+        Campaign storage campaign = _campaigns[_campaignId];
+        require(campaign.status == CampaignStatus.ACTIVE, "Campaign is not active");
+        require(
+            campaign.saleStartTime < block.timestamp && campaign.saleEndTime > block.timestamp,
+            "You cannot join now"
+        );
+        require(campaign.maxAlloc >= amount && campaign.minAlloc <= amount, "Amount is not right");
+        require(campaign.maxGoal >= campaign.totalAlloc + amount, "Amount exceeds the goal");
+
+        _userAllocations[_campaignId][msg.sender] += amount;
+        campaign.totalAlloc += amount;
+        IERC20(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
+    }
+
+    function claim(uint256 _campaignId) external {
+        Campaign storage campaign = _campaigns[_campaignId];
+        require(campaign.status == CampaignStatus.SUCCESS, "Campaign is not successful");
+
+        uint256 claimable = _getTotalClaimable(_campaignId, msg.sender);
+        _userClaimInfo[_campaignId][msg.sender].latestClaimTime = block.timestamp;
+        uint256 amountToSend = (claimable * campaign.conversionRate) / PRECISION;
+        IERC20(campaign.tokenSell).transfer(msg.sender, amountToSend);
+    }
+
+    function refund(uint256 _campaignId) external {
+        Campaign storage campaign = _campaigns[_campaignId];
+        require(campaign.status == CampaignStatus.FAIL, "Campaign did not fail");
+        require(_userAllocations[_campaignId][msg.sender] > 0, "No allocation to refund");
+
+        IERC20(campaign.tokenBuy).transfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
+        _userAllocations[_campaignId][msg.sender] = 0;
+    }
+
+    function _getTotalClaimable(uint256 _campaignId, address owner) public view returns (uint256) {
+        Campaign memory campaign = _campaigns[_campaignId];
+        ClaimInfo memory claimInfo = _userClaimInfo[_campaignId][owner];
+        uint256 userAllocation = _userAllocations[_campaignId][owner];
+
+        uint256 claimableAmount;
+
+        for (uint256 i = 0; i < campaign.vestings.length; i++) {
+            if (
+                campaign.vestings[i].timestamp < block.timestamp &&
+                campaign.vestings[i].timestamp > claimInfo.latestClaimTime
+            ) {
+                claimableAmount += (userAllocation * campaign.vestings[i].percent) / (100 * PRECISION);
+            }
+        }
+
+        return claimableAmount;
+    }
+
+    function getCampaign(uint256 _campaignId) external view returns (Campaign memory) {
+        return _campaigns[_campaignId];
+    }
+
+    function getUserAllocation(uint256 _campaignId, address user) external view returns (uint256) {
+        return _userAllocations[_campaignId][user];
+    }
+}
