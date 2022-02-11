@@ -42,6 +42,10 @@ contract IDO is Ownable {
     mapping(uint256 => mapping(address => uint256)) private _userAllocations;
     mapping(uint256 => mapping(address => uint256)) private _userClaimed;
 
+    event CreateCampaign(uint256 indexed campaignId);
+    event ApproveCampaign(uint256 indexed campaignId, address indexed owner);
+    event JoinCampaign(uint256 indexed campaignId, address indexed user, uint256 amount);
+
     function create(
         address tokenBuy,
         address tokenSell,
@@ -76,6 +80,7 @@ contract IDO is Ownable {
 
         require(totalPercentage == 100 * PRECISION, "Total percentage should be 100");
 
+        emit CreateCampaign(campaignId);
         campaignId += 1;
     }
 
@@ -90,6 +95,8 @@ contract IDO is Ownable {
             campaign.status = CampaignStatus.SUCCESS;
             IERC20Metadata(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
         }
+
+        emit ApproveCampaign(_campaignId, owner);
     }
 
     function join(uint256 _campaignId, uint256 amount) external {
@@ -105,6 +112,8 @@ contract IDO is Ownable {
         _userAllocations[_campaignId][msg.sender] += amount;
         campaign.totalAlloc += amount;
         IERC20Metadata(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
+
+        emit JoinCampaign(_campaignId, msg.sender, amount);
     }
 
     function claim(uint256 _campaignId) external {
