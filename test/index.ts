@@ -4,6 +4,11 @@ import { BigNumber, BigNumberish } from "ethers";
 import { ethers } from "hardhat";
 import { ERC20Token, ERC20Token__factory, IDO, IDO__factory } from "../src/types";
 
+const _tokenBuyPrecision = 10;
+const _tokenSellPrecision = 10;
+const tokenBuyPrecision = BigNumber.from(10).pow(_tokenBuyPrecision);
+const tokenSellPrecision = BigNumber.from(10).pow(_tokenSellPrecision);
+
 describe("Staking", function () {
     let accounts: SignerWithAddress[];
     let owner: SignerWithAddress;
@@ -20,8 +25,8 @@ describe("Staking", function () {
     });
 
     beforeEach(async function () {
-        tokenBuy = await getTokenContract(owner, "BNB", "BNB");
-        tokenSell = await getTokenContract(owner, "SellToken", "STK");
+        tokenBuy = await getTokenContract(owner, "BNB", "BNB", _tokenBuyPrecision);
+        tokenSell = await getTokenContract(owner, "SellToken", "STK", _tokenSellPrecision);
         ido = await getIDOContract(owner);
     });
 
@@ -44,7 +49,7 @@ describe("Staking", function () {
     });
 
     it("Should join to campaign", async function () {
-        const firstJoinAmount = ethers.utils.parseEther("1000");
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
 
         // owner mint and approve 
         await tokenBuy.mint(owner.address, firstJoinAmount.mul(5));
@@ -56,10 +61,10 @@ describe("Staking", function () {
 
         await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 0
 
-        await expect(ido.join(0, ethers.utils.parseEther("400"))) // Less than min alloc
+        await expect(ido.join(0, BigNumber.from(400).mul(tokenBuyPrecision))) // Less than min alloc
             .to.revertedWith("Amount is not right");
 
-        await expect(ido.join(0, ethers.utils.parseEther("1100"))) // More than max alloc
+        await expect(ido.join(0, BigNumber.from(1100).mul(tokenBuyPrecision))) // More than max alloc
             .to.revertedWith("Amount is not right");
 
         await expect(await ido.join(0, firstJoinAmount))
@@ -72,12 +77,12 @@ describe("Staking", function () {
         await ido.join(0, firstJoinAmount); // 5000
 
         expect((await ido.getUserInfo(0, owner.address))['allocation'])
-            .equal(ethers.utils.parseEther("4000"));
+            .equal(firstJoinAmount.mul(4));
         expect((await ido.getUserInfo(0, accounts[1].address))['allocation'])
-            .equal(ethers.utils.parseEther("1000"));
+            .equal(firstJoinAmount);
 
         expect((await ido.connect(accounts[1]).getCampaign(0))['totalAlloc'])
-            .equal(ethers.utils.parseEther("5000"));
+            .equal(firstJoinAmount.mul(5));
 
         await expect(ido.join(0, firstJoinAmount)) // More than max goal
             .to.revertedWith("Amount exceeds the goal");
@@ -94,7 +99,7 @@ describe("Staking", function () {
     });
 
     it("Should approve campaign", async function () {
-        const firstJoinAmount = ethers.utils.parseEther("1000");
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
 
         // owner mint and approve 
         await tokenBuy.mint(owner.address, firstJoinAmount.mul(3));
@@ -128,7 +133,7 @@ describe("Staking", function () {
 
         await expect(await ido.approve(0, accounts[2].address))
             .to.emit(tokenBuy, "Transfer")
-            .withArgs(ido.address, accounts[2].address, ethers.utils.parseEther("3000")); // IDO successful send all the funds to the address
+            .withArgs(ido.address, accounts[2].address, firstJoinAmount.mul(3)); // IDO successful send all the funds to the address
 
         expect((await ido.getCampaign(0))['status'])
             .equal(2); // CampaignStatus.SUCCESS
@@ -140,7 +145,7 @@ describe("Staking", function () {
     });
 
     it("Should refund", async function () {
-        const firstJoinAmount = ethers.utils.parseEther("1000");
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
 
         // owner mint and approve 
         await tokenBuy.mint(owner.address, firstJoinAmount.mul(3));
@@ -175,18 +180,19 @@ describe("Staking", function () {
 
         await expect(await ido.connect(accounts[1]).refund(1))
             .to.emit(tokenBuy, "Transfer")
-            .withArgs(ido.address, accounts[1].address, ethers.utils.parseEther("1500"));
+            .withArgs(ido.address, accounts[1].address, firstJoinAmount.add(firstJoinAmount.div(2))); // 1500 refund
 
         await expect(ido.connect(accounts[1]).refund(1))
             .to.revertedWith("No allocation to refund"); // try to refund again
     });
 
     it("Should claim", async function () {
-        const firstJoinAmount = ethers.utils.parseEther("1000");
+        // const firstJoinAmount = ethers.utils.parseEther("1000");
+        const firstJoinAmount = BigNumber.from(1000).mul(tokenBuyPrecision);
 
         // tokenSell mint and approve
-        await tokenSell.mint(ido.address, firstJoinAmount.mul(12));
-        await tokenBuy.approve(ido.address, firstJoinAmount.mul(12));
+        await tokenSell.mint(ido.address, BigNumber.from(1000).mul(tokenSellPrecision).mul(12));
+        await tokenSell.approve(ido.address, BigNumber.from(1000).mul(tokenSellPrecision).mul(12));
 
         // owner mint and approve 
         await tokenBuy.mint(owner.address, firstJoinAmount.mul(3));
@@ -221,26 +227,30 @@ describe("Staking", function () {
         await expect(ido.claim(2))
             .to.revertedWith("Campaign is not successful");
 
+        console.log("Precision buy: %s", tokenBuyPrecision);
+        console.log("Precision sell: %s", tokenSellPrecision);
+        console.log("Should: %s", BigNumber.from(1500).mul(tokenSellPrecision));
+
         await expect(await ido.claim(0))
             .to.emit(tokenSell, "Transfer")
-            .withArgs(ido.address, owner.address, ethers.utils.parseEther("1500"));
+            .withArgs(ido.address, owner.address, BigNumber.from(1500).mul(tokenSellPrecision));
 
 
         await simulateTimePassed(30 * (60 * 60 * 24)); // 1 month passed
 
         await expect(await ido.claim(0))
             .to.emit(tokenSell, "Transfer")
-            .withArgs(ido.address, owner.address, ethers.utils.parseEther("750"));
+            .withArgs(ido.address, owner.address, BigNumber.from(750).mul(tokenSellPrecision));
 
         await simulateTimePassed(30 * (60 * 60 * 24)); // 1 month passed
 
         await expect(await ido.claim(0))
             .to.emit(tokenSell, "Transfer")
-            .withArgs(ido.address, owner.address, ethers.utils.parseEther("750"));
+            .withArgs(ido.address, owner.address, BigNumber.from(750).mul(tokenSellPrecision));
 
         await expect(await ido.connect(accounts[1]).claim(1))
             .to.emit(tokenSell, "Transfer")
-            .withArgs(ido.address, accounts[1].address, ethers.utils.parseEther("6000")); // because never claimed during 3 months and 3 times conversion rate
+            .withArgs(ido.address, accounts[1].address, BigNumber.from(6000).mul(tokenSellPrecision)); // because never claimed during 3 months and 3 times conversion rate
     });
 
 
@@ -249,12 +259,12 @@ describe("Staking", function () {
 async function createCampaign(idoContract: IDO, tokenBuy: ERC20Token, tokenSell: ERC20Token, conversionRate: BigNumberish, owner: SignerWithAddress) {
     const vestings = [{ percent: ethers.utils.parseEther("50"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
     const startTime = BigNumber.from((await ethers.provider.getBlock("latest"))['timestamp']);
-    return idoContract.connect(owner).create(tokenBuy.address, tokenSell.address, ethers.utils.parseEther("500"), ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000"), ethers.utils.parseEther("5000"), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings);
+    return idoContract.connect(owner).create(tokenBuy.address, tokenSell.address, BigNumber.from(500).mul(tokenBuyPrecision), BigNumber.from(1000).mul(tokenBuyPrecision), BigNumber.from(2000).mul(tokenBuyPrecision), BigNumber.from(5000).mul(tokenBuyPrecision), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings);
 };
 
-async function getTokenContract(owner: SignerWithAddress, tokenName: string, tokenSymbol: string) {
+async function getTokenContract(owner: SignerWithAddress, tokenName: string, tokenSymbol: string, decimals: BigNumberish) {
     const factory = new ERC20Token__factory(owner);
-    const contract = await factory.deploy(tokenName, tokenSymbol);
+    const contract = await factory.deploy(tokenName, tokenSymbol, decimals);
     await contract.deployed();
 
     return contract;
