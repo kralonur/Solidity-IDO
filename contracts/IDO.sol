@@ -113,7 +113,7 @@ contract IDO is Ownable {
 
         uint256 claimable = _getTotalClaimable(_campaignId, msg.sender);
         _userClaimed[_campaignId][msg.sender] += claimable;
-        uint256 amountToSend = ((claimable * (10e12)) * campaign.conversionRate) / PRECISION;
+        uint256 amountToSend = (claimable * campaign.conversionRate) / PRECISION;
         IERC20Metadata(campaign.tokenSell).safeTransfer(msg.sender, amountToSend);
     }
 
