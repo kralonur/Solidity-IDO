@@ -26,7 +26,21 @@ describe("Staking", function () {
     });
 
     it("Should create campaign", async function () {
-        await createCampaign(ido, tokenBuy, tokenSell, conversionRate, owner); // id 0
+        const startTime = BigNumber.from((await ethers.provider.getBlock("latest"))['timestamp']);
+
+        // percentage less than 100
+        let vestings = [{ percent: ethers.utils.parseEther("40"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
+        await expect(ido.create(tokenBuy.address, tokenSell.address, ethers.utils.parseEther("500"), ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000"), ethers.utils.parseEther("5000"), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings))
+            .to.revertedWith("Total percentage should be 100");
+
+        // percentage more than 100
+        vestings = [{ percent: ethers.utils.parseEther("75"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
+        await expect(ido.create(tokenBuy.address, tokenSell.address, ethers.utils.parseEther("500"), ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000"), ethers.utils.parseEther("5000"), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings))
+            .to.revertedWith("Total percentage should be 100");
+
+        // percentage equal to 100
+        vestings = [{ percent: ethers.utils.parseEther("50"), timestamp: (30 * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 2) * (60 * 60 * 24)) }, { percent: ethers.utils.parseEther("25"), timestamp: ((30 * 3) * (60 * 60 * 24)) }];
+        await ido.create(tokenBuy.address, tokenSell.address, ethers.utils.parseEther("500"), ethers.utils.parseEther("1000"), ethers.utils.parseEther("2000"), ethers.utils.parseEther("5000"), conversionRate, startTime, startTime.add((60 * 60 * 3)), vestings);
     });
 
     it("Should join to campaign", async function () {
@@ -57,9 +71,9 @@ describe("Staking", function () {
         await ido.connect(accounts[1]).join(0, firstJoinAmount); // 4000 , account1 sent 1000
         await ido.join(0, firstJoinAmount); // 5000
 
-        expect(await ido.getUserAllocation(0, owner.address))
+        expect((await ido.getUserInfo(0, owner.address))['allocation'])
             .equal(ethers.utils.parseEther("4000"));
-        expect(await ido.getUserAllocation(0, accounts[1].address))
+        expect((await ido.getUserInfo(0, accounts[1].address))['allocation'])
             .equal(ethers.utils.parseEther("1000"));
 
         expect((await ido.connect(accounts[1]).getCampaign(0))['totalAlloc'])

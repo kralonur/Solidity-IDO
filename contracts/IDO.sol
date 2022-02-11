@@ -35,17 +35,12 @@ contract IDO is Ownable {
         Vesting[] vestings;
     }
 
-    struct ClaimInfo {
-        uint256 latestClaimTime;
-        uint256 claimedAmount;
-    }
-
     uint256 public campaignId;
     uint256 public constant PRECISION = 1e18;
 
     mapping(uint256 => Campaign) private _campaigns;
     mapping(uint256 => mapping(address => uint256)) private _userAllocations;
-    mapping(uint256 => mapping(address => ClaimInfo)) private _userClaimInfo;
+    mapping(uint256 => mapping(address => uint256)) private _userClaimed;
 
     function create(
         address tokenBuy,
@@ -62,7 +57,6 @@ contract IDO is Ownable {
         Campaign storage campaign = _campaigns[campaignId];
         campaign.tokenBuy = tokenBuy;
         campaign.tokenSell = tokenSell;
-        campaign.totalAlloc = 0;
         campaign.minAlloc = minAlloc;
         campaign.maxAlloc = maxAlloc;
         campaign.minGoal = minGoal;
@@ -72,11 +66,15 @@ contract IDO is Ownable {
         campaign.saleEndTime = saleEndTime;
         campaign.status = CampaignStatus.ACTIVE;
 
+        uint256 totalPercentage;
         for (uint256 i = 0; i < vestings.length; i++) {
             _campaigns[campaignId].vestings.push(
                 Vesting(vestings[i].percent, campaign.saleEndTime + vestings[i].timestamp)
             );
+            totalPercentage += vestings[i].percent;
         }
+
+        require(totalPercentage == 100 * PRECISION, "Total percentage should be 100");
 
         campaignId += 1;
     }
@@ -114,9 +112,9 @@ contract IDO is Ownable {
         require(campaign.status == CampaignStatus.SUCCESS, "Campaign is not successful");
 
         uint256 claimable = _getTotalClaimable(_campaignId, msg.sender);
-        _userClaimInfo[_campaignId][msg.sender].latestClaimTime = block.timestamp;
+        _userClaimed[_campaignId][msg.sender] += claimable;
         uint256 amountToSend = (claimable * campaign.conversionRate) / PRECISION;
-        IERC20(campaign.tokenSell).transfer(msg.sender, amountToSend);
+        IERC20(campaign.tokenSell).safeTransfer(msg.sender, amountToSend);
     }
 
     function refund(uint256 _campaignId) external {
@@ -124,34 +122,35 @@ contract IDO is Ownable {
         require(campaign.status == CampaignStatus.FAIL, "Campaign did not fail");
         require(_userAllocations[_campaignId][msg.sender] > 0, "No allocation to refund");
 
-        IERC20(campaign.tokenBuy).transfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
+        IERC20(campaign.tokenBuy).safeTransfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
         _userAllocations[_campaignId][msg.sender] = 0;
     }
 
     function _getTotalClaimable(uint256 _campaignId, address owner) public view returns (uint256) {
         Campaign memory campaign = _campaigns[_campaignId];
-        ClaimInfo memory claimInfo = _userClaimInfo[_campaignId][owner];
+        uint256 claimed = _userClaimed[_campaignId][owner];
         uint256 userAllocation = _userAllocations[_campaignId][owner];
 
         uint256 claimableAmount;
 
         for (uint256 i = 0; i < campaign.vestings.length; i++) {
-            if (
-                campaign.vestings[i].timestamp < block.timestamp &&
-                campaign.vestings[i].timestamp > claimInfo.latestClaimTime
-            ) {
+            if (campaign.vestings[i].timestamp < block.timestamp)
                 claimableAmount += (userAllocation * campaign.vestings[i].percent) / (100 * PRECISION);
-            }
         }
 
-        return claimableAmount;
+        return claimableAmount - claimed;
     }
 
     function getCampaign(uint256 _campaignId) external view returns (Campaign memory) {
         return _campaigns[_campaignId];
     }
 
-    function getUserAllocation(uint256 _campaignId, address user) external view returns (uint256) {
-        return _userAllocations[_campaignId][user];
+    function getUserInfo(uint256 _campaignId, address user)
+        external
+        view
+        returns (uint256 allocation, uint256 claimed)
+    {
+        allocation = _userAllocations[_campaignId][user];
+        claimed = (_userClaimed[_campaignId][user] * _campaigns[_campaignId].conversionRate) / PRECISION;
     }
 }
