@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Unlicensed
 pragma solidity >=0.8.4;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract IDO is Ownable {
-    using SafeERC20 for IERC20;
+    using SafeERC20 for IERC20Metadata;
 
     struct Vesting {
         uint256 percent;
@@ -88,7 +88,7 @@ contract IDO is Ownable {
             campaign.status = CampaignStatus.FAIL;
         } else {
             campaign.status = CampaignStatus.SUCCESS;
-            IERC20(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
+            IERC20Metadata(campaign.tokenBuy).safeTransfer(owner, campaign.totalAlloc);
         }
     }
 
@@ -104,7 +104,7 @@ contract IDO is Ownable {
 
         _userAllocations[_campaignId][msg.sender] += amount;
         campaign.totalAlloc += amount;
-        IERC20(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20Metadata(campaign.tokenBuy).safeTransferFrom(msg.sender, address(this), amount);
     }
 
     function claim(uint256 _campaignId) external {
@@ -113,8 +113,8 @@ contract IDO is Ownable {
 
         uint256 claimable = _getTotalClaimable(_campaignId, msg.sender);
         _userClaimed[_campaignId][msg.sender] += claimable;
-        uint256 amountToSend = (claimable * campaign.conversionRate) / PRECISION;
-        IERC20(campaign.tokenSell).safeTransfer(msg.sender, amountToSend);
+        uint256 amountToSend = ((claimable * (10e12)) * campaign.conversionRate) / PRECISION;
+        IERC20Metadata(campaign.tokenSell).safeTransfer(msg.sender, amountToSend);
     }
 
     function refund(uint256 _campaignId) external {
@@ -122,7 +122,7 @@ contract IDO is Ownable {
         require(campaign.status == CampaignStatus.FAIL, "Campaign did not fail");
         require(_userAllocations[_campaignId][msg.sender] > 0, "No allocation to refund");
 
-        IERC20(campaign.tokenBuy).safeTransfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
+        IERC20Metadata(campaign.tokenBuy).safeTransfer(msg.sender, _userAllocations[_campaignId][msg.sender]);
         _userAllocations[_campaignId][msg.sender] = 0;
     }
 
